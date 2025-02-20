@@ -1,17 +1,20 @@
 import numpy as np
 import gymnasium as gym
 import matplotlib.pyplot as plt
-from blackjack import BlackjackEnv  # ensure this file is accessible
+from blackjack import BlackjackEnv
+
 
 def state_to_key(state):
-    if isinstance(state, np.ndarray):
-        return tuple(state.tolist())
-    elif isinstance(state, (list, tuple)):
-        return tuple(state_to_key(s) for s in state)
+    """Convert state into a simplified key for Q-table lookup."""
+    if isinstance(state, tuple) and len(state) == 3:
+        player_sum, dealer_card, ace_usable = state
+        return (player_sum, dealer_card, int(ace_usable))
     else:
-        return state
+        return tuple(state)  # Fallback for unexpected formats
+
 
 def choose_action(state, Q, n_actions, epsilon):
+    """Epsilon-greedy action selection with decay."""
     if state not in Q:
         Q[state] = np.zeros(n_actions)
     if np.random.rand() < epsilon:
@@ -19,7 +22,9 @@ def choose_action(state, Q, n_actions, epsilon):
     else:
         return np.argmax(Q[state])
 
-def evaluate_policy(env, Q, n_actions, num_eval_episodes=1000):
+
+def evaluate_policy(env, Q, n_actions, num_eval_episodes=5000):
+    """Evaluate the learned policy."""
     win_count = 0
     total_reward = 0.0
     for _ in range(num_eval_episodes):
@@ -28,11 +33,18 @@ def evaluate_policy(env, Q, n_actions, num_eval_episodes=1000):
         done = False
         episode_reward = 0.0
         while not done:
-            # Use greedy policy for evaluation.
             if state not in Q:
                 Q[state] = np.zeros(n_actions)
             action = np.argmax(Q[state])
             next_obs, reward, terminated, truncated, _ = env.step(action)
+
+            # Reward shaping
+            if terminated:
+                if reward == 0:  # Push
+                    reward = 0.1
+                elif reward == -1:  # Loss
+                    reward = -0.1
+
             episode_reward += reward
             state = state_to_key(next_obs)
             done = terminated or truncated
@@ -43,21 +55,25 @@ def evaluate_policy(env, Q, n_actions, num_eval_episodes=1000):
     win_rate = win_count / num_eval_episodes * 100
     return avg_reward, win_rate
 
+
 def main():
     env = BlackjackEnv(render_mode=None, natural=False, sab=False)
-    num_episodes = 900000
+    num_episodes = 1500000  # Increased for better convergence
     alpha = 0.01
-    gamma = 1.0
+    gamma = 0.99  # Slightly less than 1 for stability
     epsilon = 0.9
+    epsilon_decay = 0.999995
+    min_epsilon = 0.1
+    alpha_decay = 0.99999
+    min_alpha = 0.001
     n_actions = env.action_space.n
     Q = {}
 
-    # Lists to store periodic evaluation results.
     evaluation_points = []
     win_rates = []
     avg_rewards = []
 
-    eval_interval = 10000  # evaluate every 10,000 episodes
+    eval_interval = 10000  # Evaluate every 10,000 episodes
 
     print("Starting SARSA training...")
     for episode in range(num_episodes):
@@ -71,27 +87,38 @@ def main():
             done = terminated or truncated
             next_state = state_to_key(next_obs)
             next_action = choose_action(next_state, Q, n_actions, epsilon) if not done else None
+
+            # Reward shaping
+            if terminated:
+                if reward == 0:  # Push
+                    reward = 0.1
+                elif reward == -1:  # Loss
+                    reward = -0.1
+
+            # SARSA update
             if state not in Q:
                 Q[state] = np.zeros(n_actions)
-            if not done:
-                target = reward + gamma * Q[next_state][next_action]
-            else:
-                target = reward
+            target = reward + (gamma * Q[next_state][next_action] if not done else reward)
             Q[state][action] += alpha * (target - Q[state][action])
-            state = next_state
-            action = next_action
+
+            state, action = next_state, next_action
+
+        # Decay epsilon and alpha
+        epsilon = max(min_epsilon, epsilon * epsilon_decay)
+        alpha = max(min_alpha, alpha * alpha_decay)
 
         # Periodic evaluation
         if (episode + 1) % eval_interval == 0:
-            avg_reward, win_rate = evaluate_policy(env, Q, n_actions, num_eval_episodes=1000)
+            avg_reward, win_rate = evaluate_policy(env, Q, n_actions, num_eval_episodes=5000)
             evaluation_points.append(episode + 1)
             avg_rewards.append(avg_reward)
             win_rates.append(win_rate)
-            print(f"Episode {episode + 1}: Average Reward = {avg_reward:.3f}, Win Rate = {win_rate:.2f}%")
+            print(
+                f"Episode {episode + 1}: Avg Reward = {avg_reward:.3f}, Win Rate = {win_rate:.2f}%, Epsilon = {epsilon:.3f}, Alpha = {alpha:.5f}")
 
     print("Training complete.\n")
 
-    # Final evaluation (if desired)
+    # Final evaluation
     num_eval_episodes = 10000
     total_reward = 0.0
     win_count = 0
@@ -111,9 +138,18 @@ def main():
                 Q[state] = np.zeros(n_actions)
             action = np.argmax(Q[state])
             next_obs, reward, terminated, truncated, _ = env.step(action)
+
+            # Reward shaping
+            if terminated:
+                if reward == 0:
+                    reward = 0.1
+                elif reward == -1:
+                    reward = -0.1
+
             episode_reward += reward
             state = state_to_key(next_obs)
             done = terminated or truncated
+
         total_reward += episode_reward
         eval_rewards.append(episode_reward)
         if env.is_bust(env.current_hand):
@@ -126,15 +162,14 @@ def main():
             loss_count += 1
 
     avg_reward_final = total_reward / num_eval_episodes
-    print(f"Final Evaluation Average Reward: {avg_reward_final:.3f}")
+    print(f"\nFinal Evaluation Average Reward: {avg_reward_final:.3f}")
     print("Outcomes:")
     print(f"  Win Rate   : {win_count / num_eval_episodes * 100:.3f}%")
     print(f"  Bust Rate  : {bust_count / num_eval_episodes * 100:.3f}%")
     print(f"  Loss Rate  : {loss_count / num_eval_episodes * 100:.3f}%")
     print(f"  Push Rate  : {push_count / num_eval_episodes * 100:.3f}%")
 
-    # ------------------- Plotting the Results -------------------
-    # Plot win rate over time during training.
+    # Plotting results
     plt.figure(figsize=(12, 5))
 
     plt.subplot(1, 2, 1)
@@ -144,7 +179,6 @@ def main():
     plt.ylabel("Win Rate (%)")
     plt.grid(True)
 
-    # Plot average reward over time during training.
     plt.subplot(1, 2, 2)
     plt.plot(evaluation_points, avg_rewards, marker='o', color='orange')
     plt.title("Average Reward Over Training")
@@ -156,6 +190,7 @@ def main():
     plt.show()
 
     env.close()
+
 
 if __name__ == "__main__":
     main()
