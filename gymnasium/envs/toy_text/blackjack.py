@@ -142,7 +142,9 @@ class BlackjackEnv(gym.Env):
         return 0 if self.is_bust(hand) else self.sum_hand(hand)
     
     def is_natural(self, hand):
-        return sorted([min(10, hand[0]), min(10, hand[1])]) == [1, 10]
+        if len(hand) == 2:
+            return sorted([min(10, hand[0]), min(10, hand[1])]) == [1, 10]
+        return False
 
     def _get_obs(self):
         # Use the active hand from self.player_hands.
