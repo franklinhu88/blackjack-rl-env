@@ -89,14 +89,14 @@ class BlackjackEnv(gym.Env):
         self._reshuffle_deck()
     
     def _reshuffle_deck(self):
-        self.deck = self.num_decks * [1,2,3,4,5,6,7,8,9,10,10,10,10] * 4
+        self.deck = self.num_decks * [1,2,3,4,5,6,7,8,9,10,11,12,13] * 4
         self.np_random.shuffle(self.deck)
         self.running_count = 0
     
     def _update_running_count(self, card):
         if card in [2,3,4,5,6]:
             self.running_count += 1
-        elif card in [10, 1]:
+        elif card in [13, 12, 11, 10, 1]:
             self.running_count -= 1
     
     def _get_true_count(self):
@@ -117,10 +117,23 @@ class BlackjackEnv(gym.Env):
         return [self.draw_card(), self.draw_card()]
 
     def sum_hand(self, hand):
-        # Compute hand total, counting a usable ace as 11 if it doesn't bust.
-        if 1 in hand and sum(hand) + 10 <= 21:
-            return sum(hand) + 10
-        return sum(hand)
+        total = 0
+        ace_count = 0  # Track the number of aces
+        
+        for card in hand:
+            if card == 1:
+                ace_count += 1
+                total += 11  # Initially count Ace as 11
+            else:
+                total += min(10, card)  # Face cards (J, Q, K) are counted as 10
+        
+        # Convert Aces from 11 to 1 if the total exceeds 21
+        while total > 21 and ace_count:
+            total -= 10
+            ace_count -= 1
+
+        return total
+
     
     def is_bust(self, hand):
         return self.sum_hand(hand) > 21
@@ -129,13 +142,13 @@ class BlackjackEnv(gym.Env):
         return 0 if self.is_bust(hand) else self.sum_hand(hand)
     
     def is_natural(self, hand):
-        return sorted(hand) == [1, 10]
+        return sorted([min(10, hand[0]), min(10, hand[1])]) == [1, 10]
 
     def _get_obs(self):
         # Use the active hand from self.player_hands.
         current_hand = self.player_hands[self.current_hand_index]
         player_total = self.sum_hand(current_hand)
-        usable_flag = int(1 in current_hand and sum(current_hand) + 10 <= 21)
+        usable_flag = int(1 in current_hand and self.sum_hand(current_hand) + 10 <= 21)
         # New flag: hand is splittable if exactly two cards and they are equal.
         splittable_flag = int(len(current_hand) == 2 and current_hand[0] == current_hand[1])
         return (player_total,
@@ -164,8 +177,7 @@ class BlackjackEnv(gym.Env):
         
         elif action == 0:  # Stick
             # Player sticks on the active hand.
-            self.dealer_turn = True  # Set dealer's turn to True
-            while self.sum_hand(self.dealer) < 17:
+            while self.sum_hand(self.dealer) < 17 and self.current_hand_index >= len(self.player_hands) - 1:
                 self.dealer.append(self.draw_card())
             reward = cmp(self.score(current_hand), self.score(self.dealer))
             # Adjust reward for naturals if applicable.
@@ -212,8 +224,8 @@ class BlackjackEnv(gym.Env):
                 # Return observation with reward 0 (the split itself gives no immediate reward).
                 return self._get_obs(), 0.0, False, False, {}
             else:
-                # Illegal split: penalty and end the episode.
-                return self._get_obs(), -20.0, True, False, {}
+                # Illegal split: shouldn't even happen continue with no changes made
+                return self._get_obs(), 0.0, True, False, {}
 
     
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
@@ -273,13 +285,9 @@ class BlackjackEnv(gym.Env):
             ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K']
             
             # If the card value is 10, pick randomly between T, J, Q, and K
-            if card_value == 10:
-                rank = random.choice(['T', 'J', 'Q', 'K'])
-            else:
-                rank = ranks[(card_value - 1) % 13]  # Adjust for 0-based indexing
-
+            rank = ranks[(card_value - 1) % 13]  # Adjust for 0-based indexing
             # Randomly pick a suit
-            suit = suits[random.randint(0, 3)]  # Map to suit based on index
+            suit = suits[0]  # Map to suit based on index
             
             return suit, rank
 
@@ -336,7 +344,7 @@ class BlackjackEnv(gym.Env):
 
         # Render Running Count below the True Count
         running_count_title = pygame.font.SysFont("Arial", 32).render(f"Running Count: {self.running_count}", True, (255, 255, 255))
-        self.screen.blit(running_count_title, (screen_width - 300, 40))  # Adjust position below True Count
+        self.screen.blit(running_count_title, (screen_width - 300, 70))  # Adjust position below True Count
 
         # Render player hands with totals
         for hand in self.player_hands:
