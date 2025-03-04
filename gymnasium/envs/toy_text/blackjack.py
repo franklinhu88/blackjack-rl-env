@@ -67,7 +67,7 @@ class BlackjackEnv(gym.Env):
         # Assume player's total can be between 0 and 31.
         self.observation_space = spaces.Tuple((
             spaces.Discrete(32),
-            spaces.Discrete(11),
+            spaces.Discrete(14),
             spaces.Discrete(2),
             spaces.Discrete(11),
             spaces.Discrete(2)
@@ -104,7 +104,7 @@ class BlackjackEnv(gym.Env):
         true_count = self.running_count / remaining_decks
         bounded_count = int(round(true_count))
         bounded_count = min(5, max(-5, bounded_count))
-        return bounded_count 
+        return bounded_count
     
     def draw_card(self):
         if len(self.deck) == 0:
@@ -156,7 +156,7 @@ class BlackjackEnv(gym.Env):
         return (player_total,
                 self.dealer[0],
                 usable_flag,
-                self._get_true_count(),
+                self._get_true_count() + 5,
                 splittable_flag)
     
     def step(self, action):
