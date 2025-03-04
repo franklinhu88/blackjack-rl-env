@@ -227,7 +227,7 @@ class BlackjackEnv(gym.Env):
                 return self._get_obs(), 0.0, False, False, {}
             else:
                 # Illegal split: shouldn't even happen continue with no changes made
-                return self._get_obs(), 0.0, True, False, {}
+                return self._get_obs(), 0.0, False, False, {}
 
     
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
