@@ -80,6 +80,7 @@ class BlackjackEnv(gym.Env):
         self.np_random = np.random.default_rng()
         self.running_count = 0
         self.evaluation_mode = evaluation_mode
+        self.split_used = False  # Track if the player has already split
 
         # Instead of a single hand, we store all player hands here.
         self.player_hands = []
@@ -213,8 +214,8 @@ class BlackjackEnv(gym.Env):
                 return self._get_obs(), reward, True, False, {}
         
         elif action == 3:
-            # Split: valid only if active hand has exactly 2 cards and they are equal.
-            if len(current_hand) == 2 and current_hand[0] == current_hand[1]:
+            if len(current_hand) == 2 and current_hand[0] == current_hand[1] and not self.split_used:
+                self.split_used = True  # Mark that the player has used their one allowed split
                 # Remove one card and form a new hand.
                 split_card = current_hand.pop()
                 new_hand = [split_card]
@@ -223,9 +224,8 @@ class BlackjackEnv(gym.Env):
                 new_hand.append(self.draw_card())
                 # Append the new hand.
                 self.player_hands.append(new_hand)
-                # Return observation with reward 0 (the split itself gives no immediate reward).
-                return self._get_obs(), 0.0, False, False, {}
-            else:
+                return self._get_obs(), 0.0, False, False, {}  # No immediate reward for splitting
+            else: 
                 # Illegal split: shouldn't even happen continue with no changes made
                 return self._get_obs(), -20.0, True, False, {}
 
@@ -244,6 +244,7 @@ class BlackjackEnv(gym.Env):
         # Reset dealer and player hands.
         self.dealer = self.draw_hand()
         self.player_hands = [self.draw_hand()]
+        self.split_used = False  # Reset the split flag for a new game
         self.current_hand_index = 0
         return self._get_obs(), {}
 
