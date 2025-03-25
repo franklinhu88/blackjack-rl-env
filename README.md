@@ -1,4 +1,4 @@
-# Blackjack RL Environment
+# Blackjack RL Environment and Algorithms for CS4359
 
 This repository is a customized reinforcement learning environment for Blackjack, built on top of the [Gymnasium](https://github.com/Farama-Foundation/Gymnasium) library by the Farama Foundation. Our modifications include the addition of *split* and *double down* actions, expanding the strategic possibilities available to learning agents.
 
@@ -35,6 +35,14 @@ Below are placeholders for running specific models. Fill in details as you devel
 ```bash
 # Example command to run Q-Learning
 ```
+
+## Group Members
+- Franklin Hu
+- Jimmy Baek
+- Hunter Qin
+- Emre Bilge
+- Sona Javadi
+- Daniel Zhang
 
 ## Acknowledgments
 This project is based on the Gymnasium library developed and maintained by the [Farama Foundation](https://github.com/Farama-Foundation). We extend our gratitude for their open-source contributions to the RL community.
