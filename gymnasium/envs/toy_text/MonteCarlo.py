@@ -2,6 +2,7 @@ import numpy as np
 import math
 import random
 from blackjack import BlackjackEnv
+import matplotlib.pyplot as plt
 
 # --- Utility functions for card evaluation (similar to blackjack.py) ---
 
@@ -88,7 +89,7 @@ N = {}   # key: (state, action)
 
 # Hyperparameters for MCTS simulation
 SIMULATION_DEPTH = 10     # maximum simulation depth
-MCTS_ITERATIONS = 200     # number of simulations per decision
+MCTS_ITERATIONS = 600     # number of simulations per decision
 EXPLORATION_CONST = 5.0   # exploration constant c
 GAMMA = 1.0               # discount factor (no discounting in episodic blackjack)
 
@@ -242,7 +243,39 @@ def evaluate_mcts_policy(num_episodes=10000):
     win_rate = wins / total
     return win_rate
 
+def evaluate_mcts_progress(num_batches=50, batch_size=200):
+    """
+    Evaluate the MCTS policy in batches and record win rates.
+    
+    Parameters:
+    - num_batches: Number of batches to evaluate.
+    - batch_size: Number of episodes per batch.
+    
+    Returns:
+    - A list of win rates for each batch.
+    """
+    batch_win_rates = []
+    for i in range(num_batches):
+        win_rate = evaluate_mcts_policy(num_episodes=batch_size)
+        batch_win_rates.append(win_rate)
+        print(f"Batch {(i+1)*batch_size} episodes: Win rate = {win_rate:.2%}")
+    return batch_win_rates
+
+
 if __name__ == '__main__':
     print("Evaluating MCTS-based Blackjack agent...")
-    win_rate = evaluate_mcts_policy(num_episodes=10000)
-    print(f"Win rate: {win_rate:.2%}")
+    final_win_rate = evaluate_mcts_policy(num_episodes=5000)
+    print(f"Final win rate: {final_win_rate:.2%}")
+
+    # Evaluate performance progress over batches
+    win_rates = evaluate_mcts_progress(num_batches=50, batch_size=200)
+    
+    # Plot the win rate progress
+    # episodes = [ (i+1)*200 for i in range(len(win_rates)) ]
+    # plt.figure(figsize=(10, 5))
+    # plt.plot(episodes, win_rates, marker='o')
+    # plt.xlabel("Episodes Evaluated")
+    # plt.ylabel("Win Rate")
+    # plt.title("Win Rate Progress of MCTS-based Blackjack Agent")
+    # plt.grid(True)
+    # plt.show()
