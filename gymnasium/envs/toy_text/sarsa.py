@@ -28,7 +28,6 @@ def evaluate_policy(env, Q, n_actions, num_eval_episodes=1000):
         done = False
         episode_reward = 0.0
         while not done:
-            # Use greedy policy for evaluation.
             if state not in Q:
                 Q[state] = np.zeros(n_actions)
             action = np.argmax(Q[state])
@@ -45,19 +44,19 @@ def evaluate_policy(env, Q, n_actions, num_eval_episodes=1000):
 
 def main():
     env = BlackjackEnv(render_mode=None, natural=False, sab=False)
-    num_episodes = 900000
-    alpha = 0.01
-    gamma = 1.0
-    epsilon = 0.9
+    num_episodes = 1000000  # Increased training episodes for more learning
+    alpha = 0.05  # Increased learning rate
+    gamma = 0.99  # Slightly discount future rewards
+    epsilon = 0.9  # Initial exploration rate
+    epsilon_min = 0.1  # Minimum exploration rate
+    epsilon_decay = 0.99995  # Gradually reduce epsilon over time
     n_actions = env.action_space.n
     Q = {}
 
-    # Lists to store periodic evaluation results.
     evaluation_points = []
     win_rates = []
     avg_rewards = []
-
-    eval_interval = 10000  # evaluate every 10,000 episodes
+    eval_interval = 20000  # Evaluate every 20,000 episodes
 
     print("Starting SARSA training...")
     for episode in range(num_episodes):
@@ -81,6 +80,9 @@ def main():
             state = next_state
             action = next_action
 
+        # Decay epsilon to reduce exploration over time
+        epsilon = max(epsilon_min, epsilon * epsilon_decay)
+
         # Periodic evaluation
         if (episode + 1) % eval_interval == 0:
             avg_reward, win_rate = evaluate_policy(env, Q, n_actions, num_eval_episodes=1000)
@@ -91,7 +93,7 @@ def main():
 
     print("Training complete.\n")
 
-    # Final evaluation (if desired)
+    # Final evaluation
     num_eval_episodes = 10000
     total_reward = 0.0
     win_count = 0
@@ -116,7 +118,7 @@ def main():
             done = terminated or truncated
         total_reward += episode_reward
         eval_rewards.append(episode_reward)
-        if env.is_bust(env.current_hand):
+        if env.is_bust(env.player_hands[env.current_hand_index]):
             bust_count += 1
         elif episode_reward > 0.0:
             win_count += 1
