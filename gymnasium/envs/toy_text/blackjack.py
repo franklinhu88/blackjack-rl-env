@@ -187,7 +187,7 @@ class BlackjackEnv(gym.Env):
             if self.sab and self.is_natural(current_hand) and not self.is_natural(self.dealer):
                 reward = 1.0
             elif not self.sab and self.natural and self.is_natural(current_hand) and reward == 1.0:
-                reward = 1.5
+                reward = 1.0
             # Move on to next hand if available.
             if self.current_hand_index < len(self.player_hands) - 1:
                 self.current_hand_index += 1
