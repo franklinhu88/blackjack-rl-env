@@ -4,194 +4,191 @@ import random
 from blackjack import BlackjackEnv
 import matplotlib.pyplot as plt
 
-# --- Utility functions for card evaluation (similar to blackjack.py) ---
 
+# -------------------------------------------------------------------------
+# Utility functions for Blackjack
+# -------------------------------------------------------------------------
 def cmp(a, b):
     """Compare two values; returns +1 if a > b, -1 if a < b, else 0."""
     return float(a > b) - float(a < b)
 
+
 def draw_card():
-    """
-    Draw a card from an infinite deck.
-    Cards are represented as integers 1-13.
-    For scoring, face cards (>=10) are treated as 10.
-    """
-    card = random.randint(1, 13)
-    return card
+    """Draw a card from an infinite deck (1-13, face cards = 10)."""
+    return random.randint(1, 13)
+
 
 def card_value(card):
     """Return the blackjack value of a card (face cards count as 10)."""
-    if card == 1:
-        return 1  # Ace is handled specially in sum_hand
-    return min(card, 10)
+    return 1 if card == 1 else min(card, 10)
+
 
 def sum_hand(hand):
     """
     Return the best score for a hand.
-    Aces can count as 11 if they don't bust the hand.
+    Aces (value=1) can count as 11 if it doesn't bust the hand.
     """
     total = sum(card_value(card) for card in hand)
-    # Count aces: a card of value 1 may be counted as 11 if it doesn't bust.
+    # If there's at least one Ace (card=1) and total + 10 <=21, add +10
     if 1 in hand and total + 10 <= 21:
         return total + 10
     return total
+
 
 def is_bust(hand):
     """Return True if the hand is bust (>21)."""
     return sum_hand(hand) > 21
 
+
+def is_natural(hand):
+    """Return True if hand is a natural blackjack (2 cards totaling 21)."""
+    return len(hand) == 2 and sum_hand(hand) == 21
+
+
 def simulate_dealer_play(dealer_hand):
-    """
-    Simulate the dealer's play: hit until the sum is at least 17.
-    Returns the final dealer hand.
-    """
+    """Dealer hits until sum >=17. Return final dealer hand."""
     hand = list(dealer_hand)
     while sum_hand(hand) < 17:
         hand.append(draw_card())
     return hand
 
-def outcome(player_hand, dealer_hand):
+
+def outcome(player_hand, dealer_hand, natural_bonus=True):
     """
-    Given a player's hand and dealer's hand (after dealer play),
-    return the reward according to blackjack rules.
-    Reward: +1 for win, -1 for loss, 0 for draw.
+    Returns the reward value based on game outcome.
+    - +1.5 for natural blackjack (if natural_bonus=True)
+    - +1 for regular win
+    - 0 for push (tie)
+    - -1 for loss/bust
+    Dealer hits to at least 17.
     """
+    # Check for player bust
     if is_bust(player_hand):
         return -1
+
+    # Process natural blackjack
+    player_natural = is_natural(player_hand)
+
+    # Complete dealer's hand
     dealer_final = simulate_dealer_play(dealer_hand)
+    dealer_natural = is_natural(dealer_final)
+
+    # Check for dealer bust
     if is_bust(dealer_final):
+        return 1.5 if (player_natural and natural_bonus) else 1
+
+    # If both have naturals, it's a push
+    if player_natural and dealer_natural:
+        return 0
+
+    # Player has natural, dealer doesn't
+    if player_natural and not dealer_natural and natural_bonus:
+        return 1.5
+
+    # Compare final hands
+    comparison = cmp(sum_hand(player_hand), sum_hand(dealer_final))
+    return comparison  # +1 for win, 0 for tie, -1 for loss
+
+
+# -------------------------------------------------------------------------
+# BASIC STRATEGY ROLLOUT POLICY
+# -------------------------------------------------------------------------
+def basic_strategy_action(player_hand, dealer_hand):
+    """
+    0 = stick, 1 = hit.
+    - If total < 12: always hit
+    - If total between 12 and 16: hit if dealer upcard >= 7, else stick
+    - If total >= 17: stick
+    """
+    total = sum_hand(player_hand)
+    dealer_upcard = dealer_hand[0]
+    upcard_val = card_value(dealer_upcard)
+
+    if total < 12:
         return 1
-    # Compare totals
-    return cmp(sum_hand(player_hand), sum_hand(dealer_final))
+    elif 12 <= total < 17:
+        return 1 if upcard_val >= 7 else 0
+    else:
+        return 0
 
 
-# --- MCTS Implementation ---
-#
-# We restrict the available actions to two:
-#   0: Stick (stand) – end your turn and let the dealer play.
-#   1: Hit – take one additional card.
-#
-# We represent a simulation state as a tuple:
-#   (player_hand, dealer_hand)
-# where each hand is represented as a tuple of card values.
-#
-# Global dictionaries (the “tree”) store:
-#   Q[state, action]: estimated value of taking action in state.
-#   N[state, action]: number of times (state, action) has been visited.
-#
-# The simulation uses a discount factor gamma and exploration constant c.
-# (In blackjack, gamma can be set to 1 since rewards are given at the end.)
-#
+# -------------------------------------------------------------------------
+# MCTS Implementation with Basic Strategy Rollout
+# -------------------------------------------------------------------------
+SIMULATION_DEPTH = 10
+MCTS_ITERATIONS = 600
+EXPLORATION_CONST = 5.0
 
-# Global MCTS trees
-Q = {}   # key: (state, action) where state = (player_hand, dealer_hand)
-N = {}   # key: (state, action)
+# MCTS with Basic Strategy Rollout
+Q = {}
+N = {}
+visited_states = set()
 
-# Hyperparameters for MCTS simulation
-SIMULATION_DEPTH = 10     # maximum simulation depth
-MCTS_ITERATIONS = 600     # number of simulations per decision
-EXPLORATION_CONST = 5.0   # exploration constant c
-GAMMA = 1.0               # discount factor (no discounting in episodic blackjack)
-
-def state_key(player_hand, dealer_hand):
-    """
-    Create a key for the simulation state.
-    We use tuple representations of the hands.
-    """
-    return (tuple(player_hand), tuple(dealer_hand))
-
-def is_terminal(state):
-    """A state is terminal if the player's hand is bust."""
-    player_hand, _ = state
-    return is_bust(player_hand)
 
 def rollout(state):
-    """
-    Rollout (default policy) from the given state.
-    We use a simple rule: hit if player's total < 17, else stick.
-    When sticking, we simulate dealer play and return the outcome.
-    """
+    """Rollout using the basic strategy policy."""
     player_hand, dealer_hand = list(state[0]), list(state[1])
-    # Continue until terminal decision (hit or stick)
     while True:
         if is_bust(player_hand):
-            return -1  # bust
-        total = sum_hand(player_hand)
-        if total < 17:
-            # Hit: take one card and continue
+            return -1
+        action = basic_strategy_action(player_hand, dealer_hand)
+        if action == 1:  # hit
             player_hand.append(draw_card())
-        else:
-            # Stick: simulate dealer play and return outcome
+        else:  # stick
             return outcome(player_hand, dealer_hand)
 
+
 def simulate(state, depth):
-    """
-    Recursive MCTS simulation from state with remaining simulation depth.
-    Returns the simulated value.
-    """
+    """One recursive MCTS simulation from the given state."""
     if is_bust(state[0]):
-        # Terminal: player already busted.
         return -1
     if depth == 0:
         return rollout(state)
-    
-    # If state is not in our tree (i.e. unvisited), initialize and do a rollout.
+
     if state not in visited_states:
-        # Initialize counts for available actions (hit=1, stick=0)
         for action in [0, 1]:
             N[(state, action)] = 0
             Q[(state, action)] = 0.0
         visited_states.add(state)
         return rollout(state)
-    
-    # Total visits for state (used for UCT)
+
     total_N = sum(N.get((state, a), 0) for a in [0, 1])
-    
-    # Select action by UCT
-    best_value = -float('inf')
+    best_value = -float("inf")
     best_action = None
     for action in [0, 1]:
         n_sa = N.get((state, action), 0)
         q_sa = Q.get((state, action), 0.0)
-        # Use UCT formula; add bonus if action not taken before.
-        uct_value = q_sa + EXPLORATION_CONST * math.sqrt(math.log(total_N + 1) / (n_sa + 1))
+        uct_value = q_sa + EXPLORATION_CONST * math.sqrt(
+            math.log(total_N + 1) / (n_sa + 1)
+        )
         if uct_value > best_value:
             best_value = uct_value
             best_action = action
 
-    # Simulate next state based on chosen action.
     player_hand, dealer_hand = list(state[0]), list(state[1])
     if best_action == 0:
-        # Stick: simulate dealer play immediately and return outcome.
         sim_reward = outcome(player_hand, dealer_hand)
-        next_state = None  # Terminal action.
         value = sim_reward
-    else:  # best_action == 1, Hit
-        # Hit: draw a card and continue the game.
-        new_card = draw_card()
-        player_hand.append(new_card)
-        next_state = state_key(player_hand, dealer_hand)
+    else:
+        player_hand.append(draw_card())
+        next_state = (tuple(player_hand), tuple(dealer_hand))
         value = simulate(next_state, depth - 1)
-    
-    # Update counts and Q value for (state, best_action)
+
     key = (state, best_action)
     N[key] = N.get(key, 0) + 1
-    Q[key] = Q.get(key, 0.0) + (value - Q.get(key, 0.0)) / N[key]
-    
+    Q[key] = Q.get(key, 0.0) + (value - Q[key]) / N[key]
     return value
 
+
 def mcts_select_action(current_state):
-    """
-    Run MCTS simulations from current_state for a fixed number of iterations.
-    Return the action (0 for stick, 1 for hit) with the highest estimated value.
-    """
+    """MCTS action selection using basic strategy rollout."""
     global visited_states
     visited_states = set()
     for _ in range(MCTS_ITERATIONS):
         simulate(current_state, SIMULATION_DEPTH)
-    # After simulations, choose the action with highest average Q.
-    best_action = None
-    best_q = -float('inf')
+
+    # Pick best Q
+    best_action, best_q = None, -float("inf")
     for action in [0, 1]:
         q_val = Q.get((current_state, action), 0.0)
         if q_val > best_q:
@@ -199,83 +196,301 @@ def mcts_select_action(current_state):
             best_action = action
     return best_action
 
-# --- Evaluation using MCTS for decision making ---
-#
-# For evaluation we run episodes in the environment.
-# At each decision point, we use MCTS to select an action.
-# Note: Our simulation restricts actions to hit (1) and stick (0).
-# We map the MCTS decision to the environment by:
-#   - Using 1 for hit.
-#   - Using 0 for stick.
-#
+
 def evaluate_mcts_policy(num_episodes=10000):
-    wins = 0
+    """
+    Evaluate MCTS with basic strategy rollout.
+    """
+    wins = busts = draws = losses = 0
     total = 0
+    true_rewards = []  # Track actual rewards from games
+    expected_values = []  # Continue to track MCTS Q-values for comparison
+    confidence_scores = []
+
     for _ in range(num_episodes):
         env = BlackjackEnv()
         obs, _ = env.reset()
         done = False
-        # We use the full internal state from the environment:
-        #   player_hand = env.player_hands[0]
-        #   dealer_hand = env.dealer
-        # (We ignore double and split; if chosen by env randomly these actions are not used.)
+        episode_reward = 0
+
         while not done:
-            # Extract complete state from the environment
-            # (Make a copy so simulation does not affect the env.)
             player_hand = list(env.player_hands[env.current_hand_index])
             dealer_hand = list(env.dealer)
-            current_state = state_key(player_hand, dealer_hand)
-            # Reset the MCTS tree (global dictionaries) for each decision.
+            current_state = (tuple(player_hand), tuple(dealer_hand))
+
+            # Reset the MCTS tree for each decision
             global Q, N
             Q = {}
             N = {}
-            # Run MCTS to select action (0: Stick, 1: Hit)
+
             action = mcts_select_action(current_state)
-            # In our evaluation, we only use hit and stick.
-            # (If the environment supports double/split, we treat them as stick.)
-            if action is None:
-                action = 0
+
+            # Confidence = |Q(stick) - Q(hit)|
+            q_stick = Q.get((current_state, 0), 0.0)
+            q_hit = Q.get((current_state, 1), 0.0)
+            confidence_scores.append(abs(q_stick - q_hit))
+
+            # Expected value of chosen action
+            if (current_state, action) in Q:
+                expected_values.append(Q[(current_state, action)])
+
+            # Take a step in the environment
             obs, reward, done, _, _ = env.step(action)
-        # A win is defined as a positive final reward.
-        if reward > 0:
-            wins += 1
+            episode_reward = reward  # For tracking final reward
+
+        # Store the true reward from the episode
+        true_rewards.append(episode_reward)
         total += 1
-    win_rate = wins / total
-    return win_rate
+
+        # Check the final outcome based on the reward
+        if episode_reward > 0:
+            wins += 1
+        elif episode_reward == 0:
+            draws += 1
+        else:  # reward < 0
+            # Check if the player busted by looking at their final hand sum
+            player_hand = list(env.player_hands[env.current_hand_index])
+            if is_bust(player_hand):
+                busts += 1
+            else:
+                losses += 1
+
+    # Note: loss_rate includes busts (total negative outcomes)
+    return {
+        "win_rate": wins / total,
+        "bust_rate": busts / total,
+        "draw_rate": draws / total,
+        "loss_rate": (losses + busts) / total,  # Combined losses and busts
+        "pure_loss_rate": losses / total,  # Losses without busts
+        "avg_ev": np.mean(expected_values) if expected_values else 0,  # MCTS Q-values
+        "avg_confidence": np.mean(confidence_scores) if confidence_scores else 0,
+        "true_ev": np.mean(true_rewards) if true_rewards else 0,  # True game rewards
+        "all_true_rewards": true_rewards,  # Store all rewards for batch calculations
+    }
+
 
 def evaluate_mcts_progress(num_batches=50, batch_size=200):
     """
-    Evaluate the MCTS policy in batches and record win rates.
-    
-    Parameters:
-    - num_batches: Number of batches to evaluate.
-    - batch_size: Number of episodes per batch.
-    
-    Returns:
-    - A list of win rates for each batch.
+    Evaluate MCTS over multiple batches.
+    Returns dict of lists for each metric.
     """
-    batch_win_rates = []
+    metrics_history = {
+        "win_rates": [],
+        "bust_rates": [],
+        "draw_rates": [],
+        "loss_rates": [],
+        "avg_evs": [],
+        "true_evs": [],
+        "avg_confidences": [],
+    }
+
     for i in range(num_batches):
-        win_rate = evaluate_mcts_policy(num_episodes=batch_size)
-        batch_win_rates.append(win_rate)
-        print(f"Batch {(i+1)*batch_size} episodes: Win rate = {win_rate:.2%}")
-    return batch_win_rates
+        metrics = evaluate_mcts_policy(num_episodes=batch_size)
+        metrics_history["win_rates"].append(metrics["win_rate"])
+        metrics_history["bust_rates"].append(metrics["bust_rate"])
+        metrics_history["draw_rates"].append(metrics["draw_rate"])
+        metrics_history["loss_rates"].append(
+            metrics["loss_rate"]
+        )  # This now includes busts
+        metrics_history["avg_evs"].append(metrics["avg_ev"])
+        metrics_history["true_evs"].append(metrics["true_ev"])
+        metrics_history["avg_confidences"].append(metrics["avg_confidence"])
+
+        print(
+            f"Batch {(i+1)*batch_size} episodes: Win rate = {metrics['win_rate']:.2%}, "
+            f"Bust rate = {metrics['bust_rate']:.2%}, EV = {metrics['avg_ev']:.4f}, True EV = {metrics['true_ev']:.4f}"
+        )
+
+    return metrics_history
 
 
-if __name__ == '__main__':
-    print("Evaluating MCTS-based Blackjack agent...")
-    final_win_rate = evaluate_mcts_policy(num_episodes=5000)
-    print(f"Final win rate: {final_win_rate:.2%}")
+# -------------------------------------------------------------------------
+# Main Execution
+# -------------------------------------------------------------------------
+if __name__ == "__main__":
+    print("Evaluating MCTS-based Blackjack agent (with Basic Strategy Rollout)...")
 
-    # Evaluate performance progress over batches
-    win_rates = evaluate_mcts_progress(num_batches=50, batch_size=200)
-    
-    # Plot the win rate progress
-    # episodes = [ (i+1)*200 for i in range(len(win_rates)) ]
-    # plt.figure(figsize=(10, 5))
-    # plt.plot(episodes, win_rates, marker='o')
-    # plt.xlabel("Episodes Evaluated")
-    # plt.ylabel("Win Rate")
-    # plt.title("Win Rate Progress of MCTS-based Blackjack Agent")
-    # plt.grid(True)
-    # plt.show()
+    # Batch evaluation for progress tracking and final metrics
+    num_batches = 50
+    batch_size = 200
+    total_episodes = num_batches * batch_size  # Total episodes will be 10,000
+
+    metrics_history = {
+        "win_rates": [],
+        "bust_rates": [],
+        "draw_rates": [],
+        "loss_rates": [],
+        "avg_evs": [],  # MCTS Q-values (internal estimates)
+        "true_evs": [],  # Actual game rewards (true outcomes)
+        "avg_confidences": [],
+    }
+
+    # Accumulate overall statistics
+    total_wins = 0
+    total_busts = 0
+    total_draws = 0
+    total_losses = 0
+    all_expected_values = []
+    all_confidence_scores = []
+    all_true_rewards = []  # Track all actual rewards
+
+    for i in range(num_batches):
+        metrics = evaluate_mcts_policy(num_episodes=batch_size)
+
+        # Track batch results for plotting
+        metrics_history["win_rates"].append(metrics["win_rate"])
+        metrics_history["bust_rates"].append(metrics["bust_rate"])
+        metrics_history["draw_rates"].append(metrics["draw_rate"])
+        metrics_history["loss_rates"].append(
+            metrics["loss_rate"]
+        )  # This now includes busts
+        metrics_history["avg_evs"].append(metrics["avg_ev"])
+        metrics_history["true_evs"].append(metrics["true_ev"])
+        metrics_history["avg_confidences"].append(metrics["avg_confidence"])
+
+        # Track overall stats for final metrics
+        total_wins += int(metrics["win_rate"] * batch_size)
+        total_busts += int(metrics["bust_rate"] * batch_size)
+        total_draws += int(metrics["draw_rate"] * batch_size)
+        total_losses += int(
+            metrics["pure_loss_rate"] * batch_size
+        )  # Track actual losses separately
+
+        # Print batch results
+        print(
+            f"Batch {(i+1)*batch_size} episodes: Win rate = {metrics['win_rate']:.2%}, "
+            f"Bust rate = {metrics['bust_rate']:.2%}, Loss rate = {metrics['pure_loss_rate']:.2%}, EV = {metrics['avg_ev']:.4f}, True EV = {metrics['true_ev']:.4f}"
+        )
+
+    # Calculate final overall metrics
+    final_win_rate = total_wins / total_episodes
+    final_bust_rate = total_busts / total_episodes
+    final_draw_rate = total_draws / total_episodes
+    final_loss_rate = (total_losses + total_busts) / total_episodes  # Combined losses
+
+    # Calculate average metrics across all batches
+    final_avg_ev = np.mean(metrics_history["avg_evs"])
+    final_avg_true_ev = np.mean(metrics_history["true_evs"])
+    final_avg_confidence = np.mean(metrics_history["avg_confidences"])
+    final_avg_win_rate = np.mean(metrics_history["win_rates"])
+
+    # Print final statistics
+    print("\nFinal Statistics after", total_episodes, "episodes:")
+    print(f"  Win rate (total):   {final_win_rate:.2%}")
+    print(f"  Win rate (avg):     {final_avg_win_rate:.2%}")
+    print(f"  Bust rate:          {final_bust_rate:.2%}")
+    print(f"  Draw rate:          {final_draw_rate:.2%}")
+    print(f"  Loss rate (w/busts):{final_loss_rate:.2%}")
+    print(f"  Avg EV:             {final_avg_ev:.4f}")
+    print(f"  Avg True EV:        {final_avg_true_ev:.4f}")
+    print(f"  Avg Confidence:     {final_avg_confidence:.4f}")
+
+    # Create an x-axis for plotting
+    episodes = [(i + 1) * batch_size for i in range(num_batches)]
+
+    # Create figure with 2x2 subplots
+    plt.figure(figsize=(15, 10))
+
+    # (A) Win Rate
+    plt.subplot(2, 2, 1)
+    plt.plot(
+        episodes, metrics_history["win_rates"], marker="o", linestyle="-", color="blue"
+    )
+    plt.axhline(y=0.5, color="red", linestyle="--", alpha=0.7, label="Break-even (50%)")
+    plt.axhline(
+        y=final_win_rate,
+        color="green",
+        linestyle="-.",
+        alpha=0.7,
+        label=f"Average Win Rate ({final_win_rate:.2%})",
+    )
+    plt.xlabel("Number of Episodes")
+    plt.ylabel("Win Rate")
+    plt.title("MCTS Win Rate Over Batches")
+    plt.legend()
+    plt.grid(True)
+
+    # (B) Expected Value (MCTS Q-values)
+    plt.subplot(2, 2, 2)
+    plt.plot(
+        episodes, metrics_history["avg_evs"], marker="s", linestyle="-", color="green"
+    )
+    plt.axhline(
+        y=0.0, color="red", linestyle="--", alpha=0.7, label="Break-even (EV=0)"
+    )
+    plt.axhline(
+        y=final_avg_ev,
+        color="blue",
+        linestyle="-.",
+        alpha=0.7,
+        label=f"Average EV ({final_avg_ev:.4f})",
+    )
+    plt.xlabel("Number of Episodes")
+    plt.ylabel("Expected Value")
+    plt.title("MCTS Expected Value")
+    plt.legend()
+    plt.grid(True)
+
+    # (C) True Expected Value
+    plt.subplot(2, 2, 3)
+    plt.plot(
+        episodes, metrics_history["true_evs"], marker="^", linestyle="-", color="purple"
+    )
+    plt.axhline(
+        y=0.0, color="red", linestyle="--", alpha=0.7, label="Break-even (True EV=0)"
+    )
+    plt.axhline(
+        y=final_avg_true_ev,
+        color="blue",
+        linestyle="-.",
+        alpha=0.7,
+        label=f"Average True EV ({final_avg_true_ev:.4f})",
+    )
+    plt.xlabel("Number of Episodes")
+    plt.ylabel("True Expected Value")
+    plt.title("MCTS True Expected Value")
+    plt.legend()
+    plt.grid(True)
+
+    # (D) Outcome Distribution Breakdown (Wins, Busts, Draws, Losses)
+    plt.subplot(2, 2, 4)
+    plt.plot(
+        episodes,
+        metrics_history["win_rates"],
+        marker="o",
+        linestyle="-",
+        color="blue",
+        label="Win Rate",
+    )
+    plt.plot(
+        episodes,
+        metrics_history["bust_rates"],
+        marker="s",
+        linestyle="-",
+        color="red",
+        label="Bust Rate",
+    )
+    plt.plot(
+        episodes,
+        metrics_history["draw_rates"],
+        marker="^",
+        linestyle="-",
+        color="green",
+        label="Draw Rate",
+    )
+    plt.plot(
+        episodes,
+        metrics_history["loss_rates"],
+        marker="d",
+        linestyle="-",
+        color="orange",
+        label="Loss Rate",
+    )
+    plt.xlabel("Number of Episodes")
+    plt.ylabel("Rate")
+    plt.title("Outcome Distribution Breakdown")
+    plt.legend()
+    plt.grid(True)
+
+    plt.tight_layout()
+    plt.show()
