@@ -208,7 +208,7 @@ def evaluate_mcts_policy(num_episodes=10000):
     confidence_scores = []
 
     for _ in range(num_episodes):
-        env = BlackjackEnv()
+        env = BlackjackEnv(natural=True)
         obs, _ = env.reset()
         done = False
         episode_reward = 0
