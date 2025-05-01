@@ -43,6 +43,11 @@ cd gymnasium
 cd envs
 cd toy_text
 python3 qlearningv1.py
+python3 qlearningv2.py
+python3 qlearningv3.py
+python3 qlearningv4.py
+python3 qlearningv5.py
+
 ```
 
 ## Group Members
