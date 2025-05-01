@@ -26,7 +26,10 @@ python3 sarsa.py
 
 ### PPO
 ```bash
-# Example command to run PPO
+git clone https://github.com/d-zg/ppo_bj
+cd ppo_bj
+pip install -r requirements.txt
+pip train_ppo.py
 ```
 
 ### Monte-Carlo
