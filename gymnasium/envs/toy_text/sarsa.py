@@ -3,6 +3,8 @@ import gymnasium as gym
 import matplotlib.pyplot as plt
 from blackjack import BlackjackEnv
 
+
+# Convert environment state to a hashable key (tuple form)
 def state_to_key(state):
     if isinstance(state, np.ndarray):
         return tuple(state.tolist())
@@ -11,14 +13,22 @@ def state_to_key(state):
     else:
         return state
 
-def choose_action(state, Q, n_actions, epsilon):
+
+# Compute softmax probabilities for action selection
+def softmax(x):
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum()
+
+
+# Choose an action using softmax exploration strategy
+def choose_action_softmax(state, Q, n_actions, temperature):
     if state not in Q:
         Q[state] = np.zeros(n_actions)
-    if np.random.rand() < epsilon:
-        return np.random.choice(n_actions)
-    else:
-        return np.argmax(Q[state])
+    probs = softmax(Q[state] / temperature)
+    return np.random.choice(n_actions, p=probs)
 
+
+# Evaluate the learned policy over multiple episodes
 def evaluate_policy(env, Q, n_actions, num_eval_episodes=1000):
     win_count = 0
     total_reward = 0.0
@@ -30,7 +40,7 @@ def evaluate_policy(env, Q, n_actions, num_eval_episodes=1000):
         while not done:
             if state not in Q:
                 Q[state] = np.zeros(n_actions)
-            action = np.argmax(Q[state])
+            action = np.argmax(Q[state])  # Always take the greedy action during evaluation
             next_obs, reward, terminated, truncated, _ = env.step(action)
             episode_reward += reward
             state = state_to_key(next_obs)
@@ -42,34 +52,41 @@ def evaluate_policy(env, Q, n_actions, num_eval_episodes=1000):
     win_rate = win_count / num_eval_episodes * 100
     return avg_reward, win_rate
 
+
 def main():
+    # Initialize environment
     env = BlackjackEnv(render_mode=None, natural=False, sab=False)
-    num_episodes = 1000000  # Increased training episodes for more learning
-    alpha = 0.05  # Increased learning rate
-    gamma = 0.99  # Slightly discount future rewards
-    epsilon = 0.9  # Initial exploration rate
-    epsilon_min = 0.1  # Minimum exploration rate
-    epsilon_decay = 0.99995  # Gradually reduce epsilon over time
+
+    # Hyperparameters
+    num_episodes = 1000000
+    alpha = 0.05
+    gamma = 0.99
+    temperature = 1.0
+    temperature_min = 0.1
+    temperature_decay = 0.99995
     n_actions = env.action_space.n
     Q = {}
 
+    # Lists to store evaluation results
     evaluation_points = []
     win_rates = []
     avg_rewards = []
     eval_interval = 20000  # Evaluate every 20,000 episodes
 
-    print("Starting SARSA training...")
+    print("Starting SARSA training with softmax action selection...")
+
+    # SARSA Training Loop
     for episode in range(num_episodes):
         obs, info = env.reset()
         state = state_to_key(obs)
-        action = choose_action(state, Q, n_actions, epsilon)
+        action = choose_action_softmax(state, Q, n_actions, temperature)
         done = False
 
         while not done:
             next_obs, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
             next_state = state_to_key(next_obs)
-            next_action = choose_action(next_state, Q, n_actions, epsilon) if not done else None
+            next_action = choose_action_softmax(next_state, Q, n_actions, temperature) if not done else None
             if state not in Q:
                 Q[state] = np.zeros(n_actions)
             if not done:
@@ -80,10 +97,10 @@ def main():
             state = next_state
             action = next_action
 
-        # Decay epsilon to reduce exploration over time
-        epsilon = max(epsilon_min, epsilon * epsilon_decay)
+        # Decay temperature to reduce exploration over time
+        temperature = max(temperature_min, temperature * temperature_decay)
 
-        # Periodic evaluation
+        # Periodic policy evaluation
         if (episode + 1) % eval_interval == 0:
             avg_reward, win_rate = evaluate_policy(env, Q, n_actions, num_eval_episodes=1000)
             evaluation_points.append(episode + 1)
@@ -93,7 +110,7 @@ def main():
 
     print("Training complete.\n")
 
-    # Final evaluation
+    # Final Evaluation
     num_eval_episodes = 10000
     total_reward = 0.0
     win_count = 0
@@ -127,6 +144,7 @@ def main():
         elif episode_reward < 0.0:
             loss_count += 1
 
+    # Print Final Results
     avg_reward_final = total_reward / num_eval_episodes
     print(f"Final Evaluation Average Reward: {avg_reward_final:.3f}")
     print("Outcomes:")
@@ -136,7 +154,6 @@ def main():
     print(f"  Push Rate  : {push_count / num_eval_episodes * 100:.3f}%")
 
     # ------------------- Plotting the Results -------------------
-    # Plot win rate over time during training.
     plt.figure(figsize=(12, 5))
 
     plt.subplot(1, 2, 1)
@@ -146,7 +163,6 @@ def main():
     plt.ylabel("Win Rate (%)")
     plt.grid(True)
 
-    # Plot average reward over time during training.
     plt.subplot(1, 2, 2)
     plt.plot(evaluation_points, avg_rewards, marker='o', color='orange')
     plt.title("Average Reward Over Training")
@@ -158,6 +174,7 @@ def main():
     plt.show()
 
     env.close()
+
 
 if __name__ == "__main__":
     main()

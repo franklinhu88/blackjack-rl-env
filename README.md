@@ -18,7 +18,10 @@ Below are placeholders for running specific models. Fill in details as you devel
 
 ### SARSA
 ```bash
-# Example command to run SARSA
+cd gymnasium
+cd envs
+cd toy_text
+python3 sarsa.py
 ```
 
 ### PPO
@@ -28,12 +31,18 @@ Below are placeholders for running specific models. Fill in details as you devel
 
 ### Monte-Carlo
 ```bash
-# Example command to run Monte-Carlo
+cd gymnasium
+cd envs
+cd toy_text
+python3 MonteCarlo.py
 ```
 
 ### Q-Learning
 ```bash
-# Example command to run Q-Learning
+cd gymnasium
+cd envs
+cd toy_text
+python3 qlearningv1.py
 ```
 
 ## Group Members
